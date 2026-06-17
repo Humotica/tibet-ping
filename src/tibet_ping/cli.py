@@ -738,6 +738,49 @@ def _cmd_probe_sendpath(target: str, base_url: str) -> None:
     )
 
 
+def _cmd_probe_golden(target: str) -> None:
+    """Walk the Golden Lane — the calibration shot (public, safe).
+
+    Hits the active-lane beacon and reads its EARNED state. A response (0x4000 alive /
+    degraded) proves the lane machinery answers at all, so that SILENCE from any other
+    target becomes meaningful: a real void/dead endpoint, not a broken pipe. The beacon's
+    'alive' is falsifiable (it self-tests the canonical registry), so this is not a faith
+    pendant — it can come back degraded.
+    """
+    base = target if target.startswith(("http://", "https://")) else f"http://{target}"
+    url = f"{base.rstrip('/')}/api/mux/golden?cmd=tibet-ping"
+    t0 = time.time()
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            latency_ms = (time.time() - t0) * 1000
+            data = json.loads(body)
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError) as e:
+        # no calibration response = the void itself — and now it is interpretable.
+        _print_probe_result(
+            "golden", target, reachable=False,
+            verdict="ROOD -- silent/void: no calibration response (real void or dead endpoint)",
+            notes=[f"no golden frame returned ({type(e).__name__})",
+                   "with a known-good golden lane as reference, this silence is a true 0x0000, "
+                   "not a broken pipe"],
+        )
+        return
+    lane = str(data.get("lane", "?"))
+    frame = str(data.get("frame", "?"))
+    if lane == "alive":
+        verdict = f"GROEN -- golden lane alive ({frame}); calibration reference holds"
+    elif lane == "degraded":
+        verdict = f"GEEL -- golden lane DEGRADED ({frame}); the instrument self-test failed"
+    else:
+        verdict = f"? -- unexpected lane state: {lane} ({frame})"
+    _print_probe_result(
+        "golden", target, reachable=True, verdict=verdict, latency_ms=latency_ms,
+        notes=[f"frame={frame}", f"state={data.get('state', '?')}",
+               f"checks={data.get('checks', {})}"],
+        extras={"frame": frame, "lane": lane},
+    )
+
+
 def _cmd_probe(args) -> None:
     """Dispatch stack-aware probes."""
     global PROBE_JSON_OUTPUT
@@ -772,6 +815,8 @@ def _cmd_probe(args) -> None:
         _cmd_probe_mux(args.target)
     elif args.probe == "sendpath":
         _cmd_probe_sendpath(args.target, args.ains_base)
+    elif args.probe == "golden":
+        _cmd_probe_golden(args.target)
     else:
         print(f"ERROR: unknown probe type: {args.probe}", file=sys.stderr)
         sys.exit(1)
@@ -1411,6 +1456,7 @@ def _usage() -> None:
     print("  tibet-ping --probe inbox <url>   Probe continuityd inbox surface")
     print("  tibet-ping --probe mux <host:port>  Probe mux TCP surface")
     print("  tibet-ping --probe sendpath <target>  Probe .aint/JIS delivery path")
+    print("  tibet-ping --probe golden <host>  Walk the Golden Lane (calibration shot, 0x4000/degraded)")
     print("    --json                         Emit probe output as JSON")
     print("    --active                       Allow tiny write where probe supports it")
     print("    --reply-to TARGET              Optional return target for later ACK path")
@@ -1489,7 +1535,7 @@ def main() -> None:
     if args[0] == "--probe":
         import argparse
         probe_parser = argparse.ArgumentParser(prog="tibet-ping")
-        probe_parser.add_argument("--probe", choices=("did", "aint", "ains", "continuityd", "listener", "handoff", "roundtrip", "inbox", "mux", "sendpath"), required=True)
+        probe_parser.add_argument("--probe", choices=("did", "aint", "ains", "continuityd", "listener", "handoff", "roundtrip", "inbox", "mux", "sendpath", "golden"), required=True)
         probe_parser.add_argument("target")
         probe_parser.add_argument(
             "--json",

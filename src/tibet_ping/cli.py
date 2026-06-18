@@ -781,6 +781,76 @@ def _cmd_probe_golden(target: str) -> None:
     )
 
 
+def _aint_sign_headers() -> dict:
+    """Signed actor-context headers from AINT_KEYFILE + AINT_AGENT_ID, or {} (unsigned)."""
+    import os
+    keyfile = os.environ.get("AINT_KEYFILE")
+    agent = os.environ.get("AINT_AGENT_ID")
+    if not (keyfile and agent):
+        return {}
+    try:
+        import base64
+        import secrets
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        raw = json.loads(open(keyfile, encoding="utf-8").read()).get("private_key", "")
+        sk = None
+        for dec in (base64.b64decode, bytes.fromhex):
+            try:
+                b = dec(raw)
+                if len(b) in (32, 64):
+                    sk = Ed25519PrivateKey.from_private_bytes(b[:32]); break
+            except Exception:
+                pass
+        if not sk:
+            return {}
+        ch = f"{secrets.token_hex(8)}:{int(time.time())}"
+        return {"X-Agent-ID": agent, "X-Challenge": ch,
+                "X-Signature": base64.b64encode(sk.sign(ch.encode())).decode()}
+    except Exception:
+        return {}
+
+
+def _cmd_probe_intent(target: str) -> None:
+    """Fire a one-shot FIR/A connect-intent — the consent knock.
+
+    Signs the request with AINT_KEYFILE/AINT_AGENT_ID if set, so you knock as a PROVEN .aint;
+    unsigned -> 0x0000 (you must prove your .aint to even knock). A live target returns 0x54
+    (consent-pending: a cmail is raised, awaiting approval); a dead/tombstoned target its v10
+    dead frame. One-shot: a repeat is not re-raised.
+    """
+    import os
+    brain = os.environ.get("BRAIN_URL", "http://localhost:8000").rstrip("/")
+    url = f"{brain}/api/mux/intent"
+    headers = _aint_sign_headers()
+    t0 = time.time()
+    try:
+        req = urllib.request.Request(
+            url, data=json.dumps({"target": target}).encode(),
+            headers={"Content-Type": "application/json", **headers}, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+            latency_ms = (time.time() - t0) * 1000
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError) as e:
+        _print_probe_result("intent", target, reachable=False,
+                            verdict=f"ROOD -- no response ({type(e).__name__})")
+        return
+    frame = data.get("frame", "?")
+    state = data.get("state", "?")
+    if state == "consent-pending":
+        tail = "cmail raised, awaiting approval" if data.get("new_request") else "already pending (one-shot)"
+        verdict = f"GEEL -- consent-pending ({frame}); {tail}"
+    elif state == "silent/void":
+        verdict = f"ROOD -- void ({frame}): {data.get('note', 'prove your .aint to knock')}"
+    elif "dead" in state:
+        verdict = f"ROOD -- {state} ({frame})"
+    else:
+        verdict = f"{state} ({frame})"
+    _print_probe_result("intent", target, reachable=True, verdict=verdict, latency_ms=latency_ms,
+                        notes=[f"frame={frame}", f"signed_as_proven_peer={bool(headers)}",
+                               data.get("note", "")],
+                        extras={"frame": frame, "state": state})
+
+
 def _cmd_probe(args) -> None:
     """Dispatch stack-aware probes."""
     global PROBE_JSON_OUTPUT
@@ -817,6 +887,8 @@ def _cmd_probe(args) -> None:
         _cmd_probe_sendpath(args.target, args.ains_base)
     elif args.probe == "golden":
         _cmd_probe_golden(args.target)
+    elif args.probe == "intent":
+        _cmd_probe_intent(args.target)
     else:
         print(f"ERROR: unknown probe type: {args.probe}", file=sys.stderr)
         sys.exit(1)
@@ -1457,6 +1529,7 @@ def _usage() -> None:
     print("  tibet-ping --probe mux <host:port>  Probe mux TCP surface")
     print("  tibet-ping --probe sendpath <target>  Probe .aint/JIS delivery path")
     print("  tibet-ping --probe golden <host>  Walk the Golden Lane (calibration shot, 0x4000/degraded)")
+    print("  tibet-ping --probe intent <target>  One-shot FIR/A connect-knock (0x54 consent-pending)")
     print("    --json                         Emit probe output as JSON")
     print("    --active                       Allow tiny write where probe supports it")
     print("    --reply-to TARGET              Optional return target for later ACK path")
@@ -1535,7 +1608,7 @@ def main() -> None:
     if args[0] == "--probe":
         import argparse
         probe_parser = argparse.ArgumentParser(prog="tibet-ping")
-        probe_parser.add_argument("--probe", choices=("did", "aint", "ains", "continuityd", "listener", "handoff", "roundtrip", "inbox", "mux", "sendpath", "golden"), required=True)
+        probe_parser.add_argument("--probe", choices=("did", "aint", "ains", "continuityd", "listener", "handoff", "roundtrip", "inbox", "mux", "sendpath", "golden", "intent"), required=True)
         probe_parser.add_argument("target")
         probe_parser.add_argument(
             "--json",

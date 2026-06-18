@@ -117,6 +117,21 @@ The sandbox probe family currently includes:
   - check whether a mux TCP surface is reachable
 - `sendpath`
   - validate an identity-routed path shape without writing a test object
+- `golden` — *the calibration shot*
+  - walk the Golden Lane: a self-test endpoint that always answers when it
+    is genuinely alive, so silence from *another* target gains meaning. Earns
+    its `alive` from a real registry self-check — it returns `degraded` if the
+    node is sick, so it stays falsifiable (not a feel-good always-200)
+- `intent` — *the one-shot connect knock*
+  - the FIR/A handshake **is** the liveness probe: "may I connect?" == "are
+    you there?". A proven `.aint` (sign with `AINT_KEYFILE` / `AINT_AGENT_ID`)
+    may knock **once** at a target → raises a one-shot consent request the
+    target later approves → `consent-pending`. Unsigned, or unknown, you get
+    the void — no scanner oracle. This is *bilateral-unknown → may I connect?*
+    as a real, gated handshake
+
+Together, `golden` / `intent` / void form the **active-lane trilogy**: a
+calibration baseline, a consented knock, and silence for the unproven.
 
 This is intentionally modest.
 
@@ -335,3 +350,26 @@ Chosen `tping+` asks:
 > Which layer is there, and in what state?
 
 That is the right evolution.
+
+
+## Enterprise
+
+For private hub hosting, SLA support, custom integrations, or compliance guidance:
+
+| | |
+|---|---|
+| **Enterprise** | enterprise@humotica.com |
+| **Support** | support@humotica.com |
+| **Security** | security@humotica.com |
+
+## License
+
+MIT
+
+## Credits
+
+Designed by [Jasper van de Meent](https://github.com/jaspertvdm). Built by Jasper and [Root AI](https://humotica.com) as part of [HumoticaOS](https://humotica.com).
+
+---
+
+**Stack-positie:** Groep `agentic` · Bootstrap = OSAPI-handshake naar [`tibet`](https://pypi.org/project/tibet-core/) + [`jis`](https://pypi.org/project/jis-core/) (fail → snaft-rule + tibet-pol-rapport) · ← [`ainternet`](https://pypi.org/project/ainternet/) · [`tibet-pol`](https://pypi.org/project/tibet-pol/) → · See `STACK.md` · See `demo/golden-path/` for the spine end-to-end.

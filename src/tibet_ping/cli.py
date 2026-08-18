@@ -1019,7 +1019,7 @@ def _cmd_demo() -> None:
     sensor = PingNode("jis:home:sensor_temp")
     stranger = PingNode("jis:evil:lockpicker")
 
-    hub.set_trust("jis:home:sensor_temp", 0.9)
+    hub.set_known("jis:home:sensor_temp")
 
     # Test 1: Trusted
     pkt = sensor.ping("jis:home:hub", "temperature.report", "Reading", payload={"celsius": 21.5})
@@ -1042,7 +1042,7 @@ def _cmd_demo() -> None:
     s1 = PingNode("jis:home:s1")
     pkt = s1.ping("jis:home:hub", "smoke.alert", "Smoke!")
     resp = hub.receive(pkt)
-    print(f"[4] Vouched device -> hub:  {resp.decision.value} (trust: {resp.trust_score:.2f})")
+    print(f"[4] Vouched device -> hub:  {resp.decision.value} (posture: {resp.posture})")
 
     # Test 5: Beacon
     hub.beacon_handler.auto_vouch_rules = [{"name": "Sensors", "device_type": "sensor"}]
@@ -1110,7 +1110,7 @@ def _cmd_send(args) -> None:
             if response:
                 print(f"\nResponse: {response.decision.value}")
                 print(f"  zone: {response.airlock_zone}")
-                print(f"  trust: {response.trust_score}")
+                print(f"  posture: {response.posture}")
                 if response.payload:
                     print(f"  payload: {response.payload}")
             else:
@@ -1174,7 +1174,7 @@ def _cmd_net_demo() -> None:
         node_a = IoTNode("jis:demo:hub", config=config_a, heartbeat_interval=300, discovery_interval=300)
         node_b = IoTNode("jis:demo:sensor", config=config_b, heartbeat_interval=300, discovery_interval=300)
 
-        node_a.set_trust("jis:demo:sensor", 0.9)
+        node_a.set_known("jis:demo:sensor")
 
         await node_a.start()
         await node_b.start()
@@ -1195,7 +1195,7 @@ def _cmd_net_demo() -> None:
 
         if response:
             print(f"   Response: {response.decision.value} (zone: {response.airlock_zone})")
-            print(f"   Trust: {response.trust_score}")
+            print(f"   Posture: {response.posture}")
         else:
             print("   No response (timeout)")
 

@@ -1,15 +1,15 @@
 """
 Ping processing engine.
 
-Integrates nonce tracking, airlock gating, vouching, and TIBET provenance.
-tibet-overlay is optional — falls back to internal trust dict.
+Integrates nonce tracking, airlock posture-gating, vouching, and TIBET provenance.
+Zero-trust by identity: the gate keys on posture (known / vouched / unknown), never a scalar.
 """
 
 import secrets
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Dict, Iterable, Optional, Tuple
 
-from .airlock import Airlock, AirlockZone
+from .airlock import Airlock, Posture
 from .nonce import NonceTracker
 from .proto import PingDecision, PingPacket, PingResponse
 from .vouch import VouchRegistry
@@ -28,8 +28,8 @@ class PingHandler:
 
     Pipeline:
         1. Replay check (nonce)
-        2. Trust lookup (overlay or internal + vouching)
-        3. Airlock gating (GROEN/GEEL/ROOD)
+        2. Posture lookup (known devices + vouching)
+        3. Airlock posture-gating (GROEN/GEEL/ROOD)
         4. TIBET audit token (if tibet-core available)
         5. Response
     """
@@ -40,14 +40,14 @@ class PingHandler:
         airlock: Airlock,
         nonce_tracker: NonceTracker,
         vouch_registry: VouchRegistry,
-        known_devices: Optional[Dict[str, float]] = None,
+        known_devices: Optional[Iterable[str]] = None,
         tibet_actor: Optional[str] = None,
     ) -> None:
         self.device_did = device_did
         self.airlock = airlock
         self.nonce_tracker = nonce_tracker
         self.vouch_registry = vouch_registry
-        self._known_devices: Dict[str, float] = known_devices or {}
+        self._known: set = set(known_devices or ())
 
         # TIBET provenance (optional)
         self._tibet = None
@@ -57,31 +57,31 @@ class PingHandler:
                 store=MemoryStore(),
             )
 
-    def set_device_trust(self, did: str, trust: float) -> None:
-        """Manually set trust for a known device."""
-        self._known_devices[did] = max(0.0, min(1.0, trust))
+    def set_known(self, did: str) -> None:
+        """Mark a device as a KNOWN sender (a structural fact — no scalar)."""
+        self._known.add(did)
+
+    def forget(self, did: str) -> None:
+        """Drop a device back to UNKNOWN posture."""
+        self._known.discard(did)
 
     def handle(self, packet: PingPacket) -> PingResponse:
-        """
-        Process an incoming ping packet.
-
-        Returns PingResponse with decision.
-        """
+        """Process an incoming ping packet. Returns PingResponse with decision."""
         start = datetime.now(timezone.utc)
 
         # 1. Replay protection
         if self.nonce_tracker.is_replay(packet.nonce, packet.timestamp):
             return self._make_response(
                 packet, PingDecision.REJECT, "ROOD",
-                trust=0.0, reason="replay_detected",
+                posture=Posture.UNKNOWN, reason="replay_detected",
             )
 
-        # 2. Get sender trust
-        trust, fira = self._get_sender_trust(packet.source_did)
+        # 2. Sender posture (structural, not scalar)
+        posture, fira = self._get_sender_posture(packet.source_did)
 
-        # 3. Airlock gating
-        decision = self.airlock.process(packet, trust)
-        zone, rule = self.airlock.gate(packet, trust)
+        # 3. Airlock posture-gating
+        decision = self.airlock.process(packet, posture)
+        zone, rule = self.airlock.gate(packet, posture)
 
         # 4. TIBET audit token
         token_id = None
@@ -93,7 +93,7 @@ class PingHandler:
                 eromheen={
                     **packet.to_tibet_eromheen(),
                     "handler_did": self.device_did,
-                    "sender_trust": trust,
+                    "sender_posture": posture.value,
                     "decision": decision.value,
                 },
                 erachter=packet.purpose,
@@ -109,7 +109,7 @@ class PingHandler:
             in_response_to=packet.packet_id,
             responder_did=self.device_did,
             decision=decision,
-            trust_score=trust,
+            posture=posture.value,
             fira_breakdown=fira,
             tibet_token_id=token_id,
             airlock_zone=zone.value,
@@ -117,39 +117,31 @@ class PingHandler:
             rtt_ms=rtt_ms,
         )
 
-    def _get_sender_trust(self, source_did: str) -> tuple:
+    def _get_sender_posture(self, source_did: str) -> Tuple[Posture, dict]:
         """
-        Get trust score for sender.
+        The sender's structural posture — the whole trust input.
 
         Priority:
-            1. Internal known_devices dict
-            2. Vouch registry (trust delegation)
-            3. Unknown → 0.0
+            1. Known devices set     -> KNOWN
+            2. Vouch registry        -> VOUCHED
+            3. Neither               -> UNKNOWN
         """
-        # Direct trust
-        if source_did in self._known_devices:
-            trust = self._known_devices[source_did]
-            return (trust, {"score": trust, "source": "known"})
+        if source_did in self._known:
+            return (Posture.KNOWN, {"posture": "known", "source": "known"})
 
-        # Vouched trust
-        vouched = self.vouch_registry.get_trust_for_device(source_did)
-        if vouched is not None:
+        if self.vouch_registry.get_trust_for_device(source_did) is not None:
             vouches = self.vouch_registry.get_vouches_for_device(source_did)
-            return (vouched, {
-                "score": vouched,
-                "source": "vouched",
-                "vouch_count": len(vouches),
-            })
+            return (Posture.VOUCHED, {"posture": "vouched", "source": "vouched",
+                                      "vouch_count": len(vouches)})
 
-        # Unknown
-        return (0.0, {"score": 0.0, "source": "unknown"})
+        return (Posture.UNKNOWN, {"posture": "unknown", "source": "unknown"})
 
     def _make_response(
         self,
         packet: PingPacket,
         decision: PingDecision,
         zone: str,
-        trust: float = 0.0,
+        posture: Posture = Posture.UNKNOWN,
         reason: str = "",
     ) -> PingResponse:
         """Quick helper for simple responses."""
@@ -159,6 +151,6 @@ class PingHandler:
             responder_did=self.device_did,
             decision=decision,
             airlock_zone=zone,
-            trust_score=trust,
+            posture=posture.value,
             payload={"reason": reason} if reason else {},
         )

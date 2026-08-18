@@ -236,9 +236,9 @@ class IoTNode:
 
     # --- Trust management (delegates to PingNode) ---
 
-    def set_trust(self, did: str, trust: float) -> None:
-        """Set trust level for a device."""
-        self._ping_node.set_trust(did, trust)
+    def set_known(self, did: str) -> None:
+        """Mark a device KNOWN (structural posture) — the trust scalar is dead."""
+        self._ping_node.set_known(did)
 
     def vouch(self, *args: Any, **kwargs: Any) -> Any:
         """Vouch for devices (delegates to PingNode)."""

@@ -81,7 +81,7 @@ class TestLinkedPairCommunication:
         await b.start()
 
         hub = PingNode("jis:test:receiver")
-        hub.set_trust("jis:test:sender", 0.9)
+        hub.set_known("jis:test:sender")
         response = hub.receive(sample_packet)
 
         await b.send_response(response, a.own_addr)

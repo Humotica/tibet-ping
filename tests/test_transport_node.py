@@ -55,7 +55,7 @@ class TestEndToEnd:
     @pytest.mark.asyncio
     async def test_trusted_ping_groen(self, hub_node, sensor_node, linked_transports) -> None:
         a, b = linked_transports
-        hub_node.set_trust("jis:test:sensor", 0.9)
+        hub_node.set_known("jis:test:sensor")
 
         response = await sensor_node.send_ping(
             target="jis:test:hub",
@@ -69,7 +69,7 @@ class TestEndToEnd:
         assert response is not None
         assert response.decision == PingDecision.ACCEPT
         assert response.airlock_zone == "GROEN"
-        assert response.trust_score == pytest.approx(0.9)
+        assert response.posture == "known"
 
     @pytest.mark.asyncio
     async def test_unknown_ping_rood_silent_drop(
@@ -90,7 +90,7 @@ class TestEndToEnd:
     @pytest.mark.asyncio
     async def test_peer_tracking(self, hub_node, sensor_node, linked_transports) -> None:
         a, b = linked_transports
-        hub_node.set_trust("jis:test:sensor", 0.9)
+        hub_node.set_known("jis:test:sensor")
 
         await sensor_node.send_ping(
             target="jis:test:hub",

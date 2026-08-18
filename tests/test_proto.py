@@ -79,7 +79,7 @@ def test_response_creation():
         in_response_to="ping_test001",
         responder_did="jis:home:hub",
         decision=PingDecision.ACCEPT,
-        trust_score=0.85,
+        posture="known",
         airlock_zone="GROEN",
     )
     assert resp.decision == PingDecision.ACCEPT
@@ -92,12 +92,12 @@ def test_response_serialization_roundtrip():
         in_response_to="ping_001",
         responder_did="jis:home:hub",
         decision=PingDecision.PENDING,
-        trust_score=0.5,
+        posture="known",
     )
     d = resp.to_dict()
     restored = PingResponse.from_dict(d)
     assert restored.decision == PingDecision.PENDING
-    assert restored.trust_score == 0.5
+    assert restored.posture == "known"
 
 
 def test_enum_values():

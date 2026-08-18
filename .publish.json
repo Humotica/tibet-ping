@@ -1,0 +1,20 @@
+{
+  "package": "tibet-ping",
+  "registries": {
+    "pypi": {
+      "url": "https://pypi.org/project/tibet-ping/",
+      "version": "0.2.1",
+      "deprecated": false
+    },
+    "github": {
+      "url": "https://github.com/Humotica/tibet-ping",
+      "remote": "https://github.com/Humotica/tibet-ping.git"
+    }
+  },
+  "publish": {
+    "pypi": {
+      "command": "cd /srv/jtel-stack/packages/tibet-ping && python -m build && twine upload dist/*",
+      "auth": "~/.pypirc [pypi] token"
+    }
+  }
+}

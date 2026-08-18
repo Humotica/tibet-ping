@@ -187,8 +187,8 @@ class PingResponse:
     # Response data
     payload: Dict[str, Any] = field(default_factory=dict)
     capabilities: List[str] = field(default_factory=list)
-    trust_score: float = 0.0
-    fira_breakdown: Dict[str, float] = field(default_factory=dict)
+    posture: str = "unknown"            # structural standing (known/vouched/unknown) — the scalar is dead
+    fira_breakdown: Dict[str, Any] = field(default_factory=dict)
 
     # TIBET provenance
     tibet_token_id: Optional[str] = None
@@ -212,7 +212,7 @@ class PingResponse:
             "decision": self.decision.value,
             "payload": self.payload,
             "capabilities": self.capabilities,
-            "trust_score": self.trust_score,
+            "posture": self.posture,
             "fira_breakdown": self.fira_breakdown,
             "tibet_token_id": self.tibet_token_id,
             "timestamp": self.timestamp,
@@ -231,7 +231,7 @@ class PingResponse:
             decision=PingDecision(data["decision"]),
             payload=data.get("payload", {}),
             capabilities=data.get("capabilities", []),
-            trust_score=data.get("trust_score", 0.0),
+            posture=data.get("posture", "unknown"),
             fira_breakdown=data.get("fira_breakdown", {}),
             tibet_token_id=data.get("tibet_token_id"),
             timestamp=data.get("timestamp", ""),

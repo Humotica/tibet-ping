@@ -50,18 +50,13 @@ class PingNode:
         self,
         device_did: str,
         nonce_window: int = 30,
-        trust_groen: float = 0.7,
-        trust_rood: float = 0.3,
     ) -> None:
         self.device_did = device_did
 
         # Components
         self.nonce_tracker = NonceTracker(window_seconds=nonce_window)
         self.vouch_registry = VouchRegistry()
-        self.airlock = Airlock(
-            trust_threshold_groen=trust_groen,
-            trust_threshold_rood=trust_rood,
-        )
+        self.airlock = Airlock()   # posture-gated; no scalar thresholds
         self.topology = TopologyManager()
         self.beacon_handler = BeaconHandler()
         self.handler = PingHandler(
@@ -141,11 +136,11 @@ class PingNode:
         """Process an incoming ping packet through the full pipeline."""
         return self.handler.handle(packet)
 
-    # ── Trust Management ─────────────────────────────────────
+    # ── Posture Management ───────────────────────────────────
 
-    def set_trust(self, did: str, trust: float) -> None:
-        """Set trust for a known device."""
-        self.handler.set_device_trust(did, trust)
+    def set_known(self, did: str) -> None:
+        """Mark a device KNOWN (structural fact) — the trust scalar is dead."""
+        self.handler.set_known(did)
 
     def vouch(
         self,

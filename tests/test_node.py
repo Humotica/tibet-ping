@@ -24,7 +24,7 @@ def test_basic_ping_accepted():
     hub = PingNode("jis:home:hub")
     sensor = PingNode("jis:home:sensor")
 
-    hub.set_trust("jis:home:sensor", 0.9)
+    hub.set_known("jis:home:sensor")
 
     packet = sensor.ping(
         target="jis:home:hub",
@@ -36,7 +36,7 @@ def test_basic_ping_accepted():
 
     assert response.decision == PingDecision.ACCEPT
     assert response.airlock_zone == "GROEN"
-    assert response.trust_score == 0.9
+    assert response.posture == "known"
 
 
 def test_unknown_device_rejected():
@@ -58,7 +58,7 @@ def test_unknown_device_rejected():
 def test_medium_trust_pending():
     """Device with medium trust goes to GEEL (pending)."""
     hub = PingNode("jis:home:hub")
-    hub.set_trust("jis:neighbor:device", 0.5)
+    hub.vouch(vouched_dids=["jis:neighbor:device"], reason="neighbor")
 
     neighbor = PingNode("jis:neighbor:device")
     packet = neighbor.ping(
@@ -76,7 +76,7 @@ def test_medium_trust_pending():
 def test_replay_attack_blocked():
     """Same packet sent twice → second is ROOD (replay)."""
     hub = PingNode("jis:home:hub")
-    hub.set_trust("jis:home:sensor", 0.9)
+    hub.set_known("jis:home:sensor")
     sensor = PingNode("jis:home:sensor")
 
     packet = sensor.ping(
@@ -117,9 +117,10 @@ def test_vouching_flow():
     )
     response = hub.receive(packet)
 
-    assert response.decision == PingDecision.ACCEPT
-    assert response.airlock_zone == "GROEN"
-    assert abs(response.trust_score - 0.72) < 0.001
+    # vouched posture -> GEEL (pending/HITL), never auto-allow (Jasper: vouched stays GEEL)
+    assert response.decision == PingDecision.PENDING
+    assert response.airlock_zone == "GEEL"
+    assert response.posture == "vouched"
 
 
 def test_beacon_bootstrap():
@@ -188,7 +189,7 @@ def test_airlock_rule_override():
 def test_heartbeat():
     hub = PingNode("jis:home:hub")
     sensor = PingNode("jis:home:sensor")
-    hub.set_trust("jis:home:sensor", 0.8)
+    hub.set_known("jis:home:sensor")
 
     packet = sensor.heartbeat(
         target="jis:home:hub",
@@ -217,7 +218,7 @@ def test_topology_via_node():
 
 def test_stats():
     hub = PingNode("jis:home:hub")
-    hub.set_trust("jis:s1", 0.9)
+    hub.set_known("jis:s1")
     hub.vouch(["jis:s2"], my_trust=0.9)
 
     stats = hub.stats()

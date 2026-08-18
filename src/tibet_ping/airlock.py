@@ -1,37 +1,53 @@
 """
-Trust-gated access control for incoming pings.
+Posture-gated access control for incoming pings.
 
-Three zones:
-    GROEN — Known + trusted → auto-allow
-    GEEL  — Unknown → pending (rules or HITL)
-    ROOD  — Untrusted → silent drop (no info leak)
+Zero-trust by identity, not by a scalar: the gate keys on the SENDER'S POSTURE — a structural fact
+(known / vouched / unknown) — never a 0.0-1.0 trust number. The scalar is dead.
+
+Three zones map directly from posture:
+    KNOWN   → GROEN — auto-allow
+    VOUCHED → GEEL  — pending (rules or HITL)
+    UNKNOWN → ROOD  — silent drop (no info leak)
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Dict, List, Optional, Tuple
 
 from .proto import PingDecision, PingPacket
 
 
+class Posture(Enum):
+    """The sender's structural standing — the trust input, replacing the legacy scalar."""
+    KNOWN = "known"
+    VOUCHED = "vouched"
+    UNKNOWN = "unknown"
+
+
 class AirlockZone(Enum):
-    """Three-zone trust model."""
+    """Three-zone access model."""
     GROEN = "GROEN"
     GEEL = "GEEL"
     ROOD = "ROOD"
 
 
+# Posture is the whole trust input now — a structural fact maps straight to a zone.
+_POSTURE_ZONE: Dict[Posture, AirlockZone] = {
+    Posture.KNOWN: AirlockZone.GROEN,
+    Posture.VOUCHED: AirlockZone.GEEL,
+    Posture.UNKNOWN: AirlockZone.ROOD,
+}
+
+
 @dataclass
 class AirlockRule:
     """
-    Pattern-based auto-decision rule.
+    Pattern-based auto-decision rule (checked before the posture default; highest priority first).
 
-    Patterns support simple glob: "*" matches everything,
-    "prefix*" matches start, "*suffix" matches end.
-
-    Examples:
+    Patterns support simple glob on identity/intent fields (never a trust number):
         {"source_did": "jis:home:*", "intent": "temperature.*"} → GROEN
         {"intent": "door.unlock"} → GEEL (force HITL)
+        {"min_posture": "known"} → require at least a known sender
     """
     rule_id: str
     name: str
@@ -40,8 +56,9 @@ class AirlockRule:
     zone: AirlockZone
     priority: int = 50  # Higher = checked first
 
-    def matches(self, packet: PingPacket, sender_trust: float) -> bool:
+    def matches(self, packet: PingPacket, posture: Posture) -> bool:
         """Check if packet matches this rule's pattern."""
+        _rank = {Posture.UNKNOWN: 0, Posture.VOUCHED: 1, Posture.KNOWN: 2}
         for key, pattern in self.pattern.items():
             if key == "source_did":
                 if not _glob_match(packet.source_did, pattern):
@@ -55,8 +72,8 @@ class AirlockRule:
             elif key == "ping_type":
                 if packet.ping_type.value != pattern:
                     return False
-            elif key == "min_trust":
-                if sender_trust < float(pattern):
+            elif key == "min_posture":
+                if _rank.get(posture, 0) < _rank.get(Posture(pattern), 0):
                     return False
         return True
 
@@ -78,27 +95,22 @@ def _glob_match(value: str, pattern: str) -> bool:
 class PendingPing:
     """Ping awaiting HITL decision."""
     packet: PingPacket
-    sender_trust: float
+    posture: Posture
     reason: str
 
 
 class Airlock:
     """
-    Trust-gated access control.
+    Posture-gated access control.
 
-    Rules are checked first (highest priority wins).
-    Then trust thresholds determine zone.
-    GEEL pings go to pending queue and trigger on_hitl_needed callback.
+    Rules are checked first (highest priority wins); otherwise the sender's posture maps to a zone.
+    GEEL pings go to the pending queue and trigger on_hitl_needed.
     """
 
     def __init__(
         self,
-        trust_threshold_groen: float = 0.7,
-        trust_threshold_rood: float = 0.3,
         on_hitl_needed: Optional[Callable[[PendingPing], None]] = None,
     ) -> None:
-        self.trust_threshold_groen = trust_threshold_groen
-        self.trust_threshold_rood = trust_threshold_rood
         self.on_hitl_needed = on_hitl_needed
         self._rules: List[AirlockRule] = []
         self.pending: Dict[str, PendingPing] = {}
@@ -113,30 +125,17 @@ class Airlock:
         return list(self._rules)
 
     def gate(
-        self, packet: PingPacket, sender_trust: float
+        self, packet: PingPacket, posture: Posture
     ) -> Tuple[AirlockZone, Optional[AirlockRule]]:
-        """
-        Determine zone for a packet.
-        Returns (zone, matched_rule_or_None).
-        """
-        # Rules first
+        """Determine zone for a packet. Returns (zone, matched_rule_or_None)."""
         for rule in self._rules:
-            if rule.matches(packet, sender_trust):
+            if rule.matches(packet, posture):
                 return (rule.zone, rule)
+        return (_POSTURE_ZONE[posture], None)
 
-        # Trust thresholds
-        if sender_trust >= self.trust_threshold_groen:
-            return (AirlockZone.GROEN, None)
-        if sender_trust < self.trust_threshold_rood:
-            return (AirlockZone.ROOD, None)
-
-        return (AirlockZone.GEEL, None)
-
-    def process(self, packet: PingPacket, sender_trust: float) -> PingDecision:
-        """
-        Full processing: gate → decision → pending queue if GEEL.
-        """
-        zone, rule = self.gate(packet, sender_trust)
+    def process(self, packet: PingPacket, posture: Posture) -> PingDecision:
+        """Full processing: gate → decision → pending queue if GEEL."""
+        zone, rule = self.gate(packet, posture)
 
         if zone == AirlockZone.GROEN:
             return PingDecision.ACCEPT
@@ -146,8 +145,8 @@ class Airlock:
         # GEEL: add to pending
         pending = PendingPing(
             packet=packet,
-            sender_trust=sender_trust,
-            reason=f"Trust {sender_trust:.2f} in GEEL zone"
+            posture=posture,
+            reason=f"Posture {posture.value} in GEEL zone"
             + (f" (rule: {rule.name})" if rule else ""),
         )
         self.pending[packet.packet_id] = pending
@@ -169,8 +168,5 @@ class Airlock:
         return {
             "rules": len(self._rules),
             "pending_count": len(self.pending),
-            "thresholds": {
-                "groen": self.trust_threshold_groen,
-                "rood": self.trust_threshold_rood,
-            },
+            "model": "posture (known->GROEN, vouched->GEEL, unknown->ROOD)",
         }

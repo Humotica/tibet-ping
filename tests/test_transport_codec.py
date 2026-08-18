@@ -39,7 +39,7 @@ def sample_response(sample_packet: PingPacket) -> PingResponse:
     from tibet_ping import PingNode
 
     hub = PingNode("jis:test:receiver")
-    hub.set_trust("jis:test:sender", 0.9)
+    hub.set_known("jis:test:sender")
     return hub.receive(sample_packet)
 
 

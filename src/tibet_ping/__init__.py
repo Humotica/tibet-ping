@@ -46,7 +46,13 @@ from .beacon import Beacon, BeaconHandler, BeaconResponse
 from .handler import PingHandler
 from .node import PingNode
 
-__version__ = "0.3.2"
+__version__ = "0.3.5"   # 31 Aug: was 0.3.2 while pyproject and the built wheels said 0.3.5 since
+                        # 18 June. The bump changed the metadata and produced artefacts but never
+                        # the string the package reports about itself, so an installed 0.3.5 answered
+                        # "0.3.2". That cost a real measurement: on .80 -- our installed-package
+                        # witness -- there was no way to tell an old deployment from a new one that
+                        # under-reports, which is the single question that node exists to answer.
+                        # File changed != artefact built != behaviour changed; this is the third claim.
 
 # Transport layer (merged from tibet-iot in v0.2.0)
 from .transport import (

@@ -1107,14 +1107,29 @@ def _cmd_send(args) -> None:
                 intent=args.intent,
                 purpose=args.purpose,
             )
-            if response:
+            # DRIE UITKOMSTEN, NIET EEN. Tot 5 sep 2026 kwamen `geweigerd`, `vastgehouden` en
+            # `onbereikbaar` hier alledrie aan als "No response (timeout)" — een hold las als
+            # een kapotte kabel. De peer hoort niet te weten WAAROM, wel WELKE van de drie.
+            status = (response.payload or {}).get("status") if response else None
+            if response and status in ("refused", "pending"):
+                held = status == "pending"
+                print("\n%s" % ("HELD    held for review" if held else "REFUSED reachable, and refusing"))
+                print(f"  code: {(response.payload or {}).get('code')}")
+                print("  %s" % ("a human decision is pending — this is not a failure"
+                                if held else "this is an answer, not a failure"))
+            elif response:
                 print(f"\nResponse: {response.decision.value}")
-                print(f"  zone: {response.airlock_zone}")
+                print(f"  zone: {getattr(response, 'airlock_zone', None)}")
                 print(f"  posture: {response.posture}")
                 if response.payload:
                     print(f"  payload: {response.payload}")
             else:
-                print("\nNo response (timeout)")
+                # ONBEREIKBAAR BLIJFT ONZEKER. Geen pakket, geen handler, geen antwoord — of een
+                # peer die jou niets verschuldigd is (0x0000). Die twee zijn met opzet niet te
+                # onderscheiden: dat is precies wat de null route hoort te verbergen.
+                print("\nUNREACHABLE  no answer")
+                print("  absence of a reply is not absence of a box —")
+                print("  an unadmitted question is refused the system, not answered")
         finally:
             await node.stop()
 

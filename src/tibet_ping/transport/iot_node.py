@@ -27,6 +27,7 @@ from .codec import PacketCodec
 from .discovery import NetworkDiscovery
 from .peers import PeerTracker
 from .relay import MeshRelay
+from ..refusal import RefusalMeter, SPEAKS_OUTWARD, refusal_response
 from .udp import Transport, TransportConfig, UDPTransport
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,10 @@ class IoTNode:
 
         # Mesh relay
         self._relay = MeshRelay(device_did)
+
+        # Begrensde waarneming van weigeringen — een niet-toegelaten vraag kost
+        # een teller, nooit een record. Zie refusal.py.
+        self._refusals = RefusalMeter()
 
         # Discovery
         self._discovery = NetworkDiscovery(
@@ -274,11 +279,29 @@ class IoTNode:
         # Process through proto pipeline (sync)
         response = self._ping_node.receive(packet)
 
-        # ROOD = silent drop (no response sent)
+        # ROOD = een BESLUIT, en de stilte naar de peer is RELATIONEEL.
+        #
+        # De null route blijft de vloer: hij is geen leeg antwoord maar een weigering om het
+        # systeem uit te geven aan een niet-toegelaten vraag (3,1 miljoen acties in seconden is
+        # geen gedachte-experiment). Een `unknown` peer kost daarom precies een teller-ophoging.
+        #
+        # Maar zodra er WEL een relatie is, beschadigt diezelfde stilte 'm: dan leest weigeren
+        # als een kapotte kabel. Die peer krijgt een gestripte weigering terug — bereikbaar en
+        # weigerend, verder niets. Zie refusal.py voor de projectie en de begrensde meter.
         if response.decision == PingDecision.REJECT:
-            logger.debug(
-                "ROOD drop: %s from %s", packet.packet_id, packet.source_did
-            )
+            speaks = response.posture in SPEAKS_OUTWARD
+            if speaks:
+                await self._transport.send_response(refusal_response(response), addr)
+            summary = self._refusals.record(
+                posture=response.posture, source_did=packet.source_did, spoke=speaks)
+            # `decision_without_observation` was de fout: dit stond op debug terwijl het proces
+            # op info draait, dus de weigering bestond en niemand zag 'm. Nu een SOM op info —
+            # begrensd, zodat de waarneming niet zelf de amplificatie wordt.
+            if summary is not None:
+                logger.info("refusals: %s", summary)
+            else:
+                logger.debug("ROOD drop: %s from %s (posture=%s, answered=%s)",
+                             packet.packet_id, packet.source_did, response.posture, speaks)
             return
 
         # Send response back
